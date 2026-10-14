@@ -24,6 +24,29 @@ import type { CronCreateDraft, CronCreateTemplateId } from "@/lib/cron/createPay
 import { formatCronPayload, formatCronSchedule, type CronJobSummary } from "@/lib/cron/types";
 import type { SkillStatusReport } from "@/lib/skills/types";
 import type { StudioGatewayAdapterType } from "@/lib/studio/settings";
+import { AgentAccessTokenSection } from "@/features/agents/components/inspect/AgentAccessTokenSection";
+
+/** CEO-only: viewer scope from the access gate (all = master/CEO role). */
+const useViewerIsOwner = (): boolean => {
+  const [isOwner, setIsOwner] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/studio/viewer", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { scope?: string };
+        if (!cancelled && payload.scope === "all") setIsOwner(true);
+      } catch {
+        // not owner
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return isOwner;
+};
 
 export type AgentSettingsPanelProps = {
   agent: AgentState;
@@ -266,6 +289,7 @@ export const AgentSettingsPanel = ({
   onSkillApiKeyChange = () => {},
   onSaveSkillApiKey = () => {},
 }: AgentSettingsPanelProps) => {
+  const viewerIsOwner = useViewerIsOwner();
   const isHermesRuntime = adapterType === "hermes";
   const initialPermissionsDraft =
     permissionsDraft ?? resolvePresetDefaultsForRole(resolveExecutionRoleFromAgent(agent));
@@ -470,6 +494,9 @@ export const AgentSettingsPanel = ({
       ) : null}
 
       <div className="flex flex-col gap-0 px-5 pb-5">
+        {viewerIsOwner ? (
+          <AgentAccessTokenSection agentId={agent.agentId} />
+        ) : null}
         {mode === "capabilities" ? (
           <section className="sidebar-section" data-testid="agent-settings-permissions">
             <div className="mt-2 flex flex-col gap-8">

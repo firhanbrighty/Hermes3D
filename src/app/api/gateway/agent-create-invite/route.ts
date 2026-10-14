@@ -27,6 +27,45 @@ const registryPath = () => {
 const slugify = (value: string) =>
   value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
 
+const resolveViewerScope = (request: Request) => {
+  const header = asTrimmedString(request.headers.get("x-studio-user-scope")).toLowerCase();
+  if (!header) return "all"; // legacy single-token deployment: master sees all
+  if (header === "all" || header === "*") return "all";
+  return header.split(",").map((entry) => entry.trim()).filter(Boolean);
+};
+
+/** CEO-only: read the manager token (if any) for one agent. */
+export async function GET(request: Request) {
+  if (resolveViewerScope(request) !== "all") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  let data: UsersFile = { users: [] };
+  try {
+    data = JSON.parse(await readFile(registryPath(), "utf8")) as UsersFile;
+  } catch {
+    return NextResponse.json({ exists: false });
+  }
+  const agentId = asTrimmedString(new URL(request.url).searchParams.get("agentId"));
+  if (!agentId) {
+    return NextResponse.json({ error: "invalid_agent_id" }, { status: 400 });
+  }
+  const user = (data.users ?? []).find(
+    (entry) =>
+      Array.isArray(entry.scope) &&
+      entry.scope.some((name) => String(name).toLowerCase() === agentId.toLowerCase()),
+  );
+  if (!user) {
+    return NextResponse.json({ exists: false, agentId });
+  }
+  return NextResponse.json({
+    exists: true,
+    agentId,
+    userId: user.id,
+    label: user.label,
+    token: user.token,
+  });
+}
+
 export async function POST(request: Request) {
   const settings = loadStudioSettings();
   const gatewayToken = asTrimmedString(settings.gateway?.token);
