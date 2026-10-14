@@ -2,45 +2,60 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+type RecentSession = {
+  displayName: string;
+  startedAt: number | null;
+  messageCount: number | null;
+  source: string | null;
+};
+
 type ProfileRecord = {
   agentId: string;
   name: string;
   emoji: string;
   role: string;
   workspace: string;
+  model: string;
   isDefault: boolean;
-  state: "working" | "idle";
+  skills: number;
+  gatewayRunning: boolean;
   lastActivityAt: number | null;
-  lastMessage: { role: string; text: string; timestamp?: number | string } | null;
   sessions: number;
-  recentSessions: Array<{ displayName: string; updatedAt: number | null }>;
+  recentSessions: RecentSession[];
+  lastMessage?: { role: string; text: string } | null;
 };
 
 type ProfilesSnapshot = {
   workspaceId: string;
   timestamp: string;
   connected: boolean;
+  source: "hermes-rest" | "gateway-fleet";
   profiles: ProfileRecord[];
 };
 
-const StateBadge = ({ state }: { state: ProfileRecord["state"] }) => (
-  <span
-    className={
-      state === "working"
-        ? "inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--accent)] px-2.5 py-0.5 text-xs font-medium text-[var(--accent-foreground)]"
-        : "inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2.5 py-0.5 text-xs font-medium text-[var(--muted-foreground)]"
-    }
-  >
-    <span
-      className={
-        state === "working"
-          ? "h-1.5 w-1.5 rounded-full bg-[oklch(0.62_0.17_145)]"
-          : "h-1.5 w-1.5 rounded-full bg-[var(--muted-foreground)] opacity-50"
-      }
-    />
-    {state === "working" ? "Working" : "Idle"}
-  </span>
-);
+const StateBadge = ({ profile }: { profile: ProfileRecord }) => {
+  const isWorking = profile.sessions > 0 && profile.lastActivityAt !== null;
+  const label = !profile.gatewayRunning ? "Gateway off" : isWorking ? "Active" : "Idle";
+  const tone = !profile.gatewayRunning
+    ? "bg-[var(--muted)] text-[var(--muted-foreground)] opacity-70"
+    : isWorking
+      ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+      : "bg-[var(--muted)] text-[var(--muted-foreground)]";
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-2.5 py-0.5 text-xs font-medium ${tone}`}>
+      <span
+        className={
+          !profile.gatewayRunning
+            ? "h-1.5 w-1.5 rounded-full bg-[var(--muted-foreground)] opacity-40"
+            : isWorking
+              ? "h-1.5 w-1.5 rounded-full bg-[oklch(0.62_0.17_145)]"
+              : "h-1.5 w-1.5 rounded-full bg-[var(--muted-foreground)] opacity-50"
+        }
+      />
+      {label}
+    </span>
+  );
+};
 
 const formatRelativeTime = (timestampMs: number | null) => {
   if (timestampMs === null) return "no activity";
@@ -74,12 +89,14 @@ export default function ProfilesPage() {
 
   useEffect(() => {
     void refresh();
-    const intervalId = setInterval(() => void refresh(), 15_000);
+    const intervalId = setInterval(() => void refresh(), 30_000);
     return () => clearInterval(intervalId);
   }, [refresh]);
 
-  const workingCount = snapshot?.profiles.filter((p) => p.state === "working").length ?? 0;
-  const idleCount = snapshot?.profiles.filter((p) => p.state === "idle").length ?? 0;
+  const activeCount =
+    snapshot?.profiles.filter(
+      (profile) => profile.gatewayRunning && profile.sessions > 0 && profile.lastActivityAt !== null,
+    ).length ?? 0;
 
   return (
     <main className="mx-auto min-h-screen max-w-5xl px-6 py-10">
@@ -88,12 +105,13 @@ export default function ProfilesPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Hermes Profiles</h1>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-              Active profiles from the connected Hermes environment.
+              Active profiles from the shared Hermes environment
+              {snapshot ? ` · source: ${snapshot.source}` : ""}.
             </p>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <span className="text-[var(--muted-foreground)]">
-              {workingCount} working · {idleCount} idle
+              {activeCount} active of {snapshot?.profiles.length ?? 0}
             </span>
             <button
               onClick={() => void refresh()}
@@ -112,13 +130,13 @@ export default function ProfilesPage() {
           <p className="font-medium text-[var(--destructive)]">Could not load profiles</p>
           <p className="mt-1 text-[var(--muted-foreground)]">{error}</p>
           <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-            Make sure Hermes3D Studio is connected to the gateway (connect screen in the office UI,
-            or HERMES3D_GATEWAY_URL / HERMES3D_GATEWAY_TOKEN in .env).
+            Make sure hermes serve is running and the gateway URL/token are configured on the server
+            (HERMES3D_GATEWAY_URL / HERMES3D_GATEWAY_TOKEN, or ~/.hermes/hermes3d/settings.json).
           </p>
         </div>
       ) : !snapshot || snapshot.profiles.length === 0 ? (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 text-sm text-[var(--muted-foreground)]">
-          No profiles reported by the gateway yet.
+          No profiles reported by the Hermes backend yet.
         </div>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2">
@@ -145,7 +163,19 @@ export default function ProfilesPage() {
                     </p>
                   </div>
                 </div>
-                <StateBadge state={profile.state} />
+                <StateBadge profile={profile} />
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-[var(--muted-foreground)]">
+                {profile.model ? (
+                  <span className="rounded bg-[var(--muted)] px-1.5 py-0.5">{profile.model}</span>
+                ) : null}
+                <span className="rounded bg-[var(--muted)] px-1.5 py-0.5">
+                  {profile.skills} skills
+                </span>
+                {profile.gatewayRunning ? (
+                  <span className="rounded bg-[var(--muted)] px-1.5 py-0.5">gateway up</span>
+                ) : null}
               </div>
 
               <p className="mt-3 text-sm text-[var(--muted-foreground)]">
@@ -164,8 +194,12 @@ export default function ProfilesPage() {
                 <ul className="mt-3 space-y-1 text-xs text-[var(--muted-foreground)]">
                   {profile.recentSessions.map((session) => (
                     <li key={session.displayName} className="flex justify-between gap-2">
-                      <span className="truncate">{session.displayName}</span>
-                      <span className="shrink-0">{formatRelativeTime(session.updatedAt)}</span>
+                      <span className="truncate">
+                        {session.source ? `${session.source}: ` : ""}
+                        {session.displayName}
+                        {session.messageCount !== null ? ` (${session.messageCount} msgs)` : ""}
+                      </span>
+                      <span className="shrink-0">{formatRelativeTime(session.startedAt)}</span>
                     </li>
                   ))}
                 </ul>
