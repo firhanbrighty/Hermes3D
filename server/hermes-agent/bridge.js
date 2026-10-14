@@ -193,12 +193,13 @@ const toHermes3dAgents = (profiles) => {
       const description = asString(p.description);
       const display =
         asString(p.display_name) ||
-        (description.includes("—") ? description.split("—")[0].trim() : "") ||
+        (description.split("—")[0].trim() || "") ||
         toDisplayName(name);
-      // Keep the part after the dash as the role ("Display — does X").
+      // Keep the part after the dash as the role ("Display — does X"); plain
+      // descriptions act as the role and the display label at once.
       const role = description.includes("—")
         ? description.split("—").slice(1).join("—").trim()
-        : description;
+        : "";
       return {
         id: name,
         name: display,
