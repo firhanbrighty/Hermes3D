@@ -51,6 +51,8 @@ const SESSION_RPC_TIMEOUT_MS = 60_000;
  * }} HermesAgentUpstream
  */
 
+const isRecord = (value) => Boolean(value && typeof value === "object" && !Array.isArray(value));
+
 const resOk = (id, payload) => ({ type: "res", id, ok: true, payload: payload ?? {} });
 const resErr = (id, code, message) => ({ type: "res", id, ok: false, error: { code, message } });
 
@@ -186,10 +188,14 @@ const toHermes3dAgents = (profiles) => {
     .map((p) => {
       const name = asString(p.name);
       const isDefault = p.is_default === true;
-      const display = asString(p.display_name) || toDisplayName(name);
-      // The long profile descriptions read as a role ("Allan — technical
-      // planner…"); keep the part after the dash so the desk label stays short.
+      // Display name precedence: hermes display_name → description part before
+      // "—" (set via rename UI) → title-cased profile name.
       const description = asString(p.description);
+      const display =
+        asString(p.display_name) ||
+        (description.includes("—") ? description.split("—")[0].trim() : "") ||
+        toDisplayName(name);
+      // Keep the part after the dash as the role ("Display — does X").
       const role = description.includes("—")
         ? description.split("—").slice(1).join("—").trim()
         : description;
@@ -499,6 +505,23 @@ function createHermesAgentUpstream(options) {
     return payload;
   };
 
+  const hermesRestProfileRename = async (oldName, newName) => {
+    const response = await fetch(
+      `${hermesRestBase()}/api/profiles/${encodeURIComponent(oldName)}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${asString(token)}`,
+        },
+        body: JSON.stringify({ new_name: newName }),
+      },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+    return payload;
+  };
+
   /** Load the fleet once per connection; a backend without profiles keeps one agent. */
   /**
    * Fallback roster via hermes serve REST (/api/profiles) when the backend
@@ -677,18 +700,79 @@ function createHermesAgentUpstream(options) {
       }
 
       case "agents.update": {
-        // Rename/description updates are profile-level on v0.19 backends.
+        // v0.19 backends: rename maps to PATCH /api/profiles/{name}; a pure
+        // display/label change maps to the profile description.
         const targetId = asString(p.agentId);
         const target = agentRoster.find((a) => a.id === targetId);
         if (!target) return resErr(id, "hermes_agent.update_not_found", `Agent "${targetId}" is not in the roster.`);
-        return resOk(id, { ok: true, agentId: targetId, name: target.name });
+        const newName = asString(p.name);
+        const oldDescription = asString(target.role);
+        const nextLabel = newName || asString(target.name);
+        const descriptionValue = oldDescription
+          ? `${nextLabel} — ${oldDescription}`
+          : nextLabel;
+        try {
+          if (newName && newName !== target.id && newName !== target.name) {
+            await hermesRestProfileRename(target.profile || target.id, newName);
+            await loadAgentRoster();
+          } else {
+            const response = await fetch(
+              `${hermesRestBase()}/api/profiles/${encodeURIComponent(target.profile || target.id)}/description`,
+              {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${asString(token)}`,
+                },
+                body: JSON.stringify({ description: descriptionValue }),
+              },
+            );
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            await loadAgentRoster();
+          }
+          const updated = agentRoster.find((a) => a.id === targetId || a.id === newName);
+          return resOk(id, { ok: true, agentId: updated?.id ?? targetId, name: updated?.name ?? nextLabel });
+        } catch (err) {
+          return resErr(id, "hermes_agent.update_failed", errorMessage(err));
+        }
       }
 
       case "agents.files.get":
         return resOk(id, { file: { missing: true } });
 
-      case "agents.files.set":
+      case "agents.files.set": {
+        // Persist IDENTITY.md name edits as the profile description label so
+        // they survive reloads.
+        const targetId = asString(p.agentId);
+        const target = agentRoster.find((a) => a.id === targetId);
+        const files = isRecord(p.files) ? p.files : {};
+        const identityFile = asString(files["IDENTITY.md"]);
+        const nameMatch = /^#\s+(.+)$/m.exec(identityFile);
+        if (target && nameMatch) {
+          const label = nameMatch[1].trim();
+          const oldDescription = asString(target.role);
+          const descriptionValue = oldDescription && oldDescription !== label
+            ? `${label} — ${oldDescription}`
+            : label;
+          try {
+            await fetch(
+              `${hermesRestBase()}/api/profiles/${encodeURIComponent(target.profile || target.id)}/description`,
+              {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${asString(token)}`,
+                },
+                body: JSON.stringify({ description: descriptionValue }),
+              },
+            );
+            await loadAgentRoster();
+          } catch (err) {
+            log(`[hermes-agent] description write failed for ${targetId}: ${errorMessage(err)}`);
+          }
+        }
         return resOk(id, {});
+      }
 
       case "config.get":
         return resOk(id, {
