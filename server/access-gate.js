@@ -198,7 +198,10 @@ function createAccessGate(options) {
         const token = String(params.get("token") || "").trim();
         const nextPath = String(params.get("next") || "/");
         const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("/studio-login") ? nextPath : "/";
-        if (token && safeCompare(token, String(options?.token ?? "").trim())) {
+        const submittedUser = findUserByToken(token);
+        const tokenValid =
+          Boolean(submittedUser) || safeCompare(token, String(options?.token ?? "").trim());
+        if (token && tokenValid) {
           res.statusCode = 303;
           res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
           res.setHeader("Location", safeNext);
