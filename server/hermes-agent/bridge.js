@@ -471,6 +471,32 @@ function createHermesAgentUpstream(options) {
   // --- method dispatch ------------------------------------------------------
 
   /** Load the fleet once per connection; a backend without profiles keeps one agent. */
+  /**
+   * Fallback roster via hermes serve REST (/api/profiles) when the backend
+   * predates the fleet `profiles.list` RPC — e.g. hermes-agent v0.19.
+   */
+  const loadAgentRosterViaRest = async () => {
+    try {
+      const url = new URL(client.url.replace(/^ws/, "http"));
+      url.search = "";
+      const response = await fetch(url.origin + "/api/profiles", {
+        headers: { Authorization: `Bearer ${asString(token)}` },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      const mapped = toHermes3dAgents(payload.profiles);
+      if (mapped.length > 0) {
+        agentRoster = mapped;
+        defaultAgentId = resolveDefaultAgentId(mapped);
+        log(`[hermes-agent] ${mapped.length} profile(s) via REST: ${mapped.map((a) => a.id).join(", ")}`);
+        return;
+      }
+      throw new Error("REST profiles list empty");
+    } catch (err) {
+      log(`[hermes-agent] REST profile roster unavailable (${err instanceof Error ? err.message : String(err)}); using a single agent`);
+    }
+  };
+
   const loadAgentRoster = async () => {
     try {
       const result = await client.request("profiles.list", {}, SESSION_RPC_TIMEOUT_MS);
@@ -481,9 +507,11 @@ function createHermesAgentUpstream(options) {
         log(`[hermes-agent] ${mapped.length} profile(s) mapped to agents: ${mapped.map((a) => a.id).join(", ")}`);
         return;
       }
-      log("[hermes-agent] profiles.list returned nothing; using a single agent");
+      log("[hermes-agent] profiles.list returned nothing; trying REST roster");
+      await loadAgentRosterViaRest();
     } catch (err) {
-      log(`[hermes-agent] profiles.list unavailable (${errorMessage(err)}); using a single agent`);
+      log(`[hermes-agent] profiles.list unavailable (${errorMessage(err)}); trying REST roster`);
+      await loadAgentRosterViaRest();
     }
   };
 
