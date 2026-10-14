@@ -47,6 +47,7 @@ const textAreaClassName =
 
 type WizardStepId =
   | "identity"
+  | "identity-token"
   | "avatar"
   | "SOUL.md"
   | "AGENTS.md"
@@ -60,6 +61,11 @@ const wizardSteps: Array<{ id: WizardStepId; label: string; hint: string }> = [
     id: "identity",
     label: "Identity",
     hint: "Create the live agent first, then fill in the rest step by step.",
+  },
+  {
+    id: "identity-token",
+    label: "Access",
+    hint: "Manager access token for this agent's dashboard login.",
   },
   {
     id: "avatar",
@@ -230,6 +236,11 @@ export function AgentCreateWizardModal({
           // Invite tidak kritis; profil tetap terpakai.
         }
       }
+      // Stay on identity: token panel must be visible before moving on.
+      setStep("identity-token");
+      return;
+    }
+    if (step === "identity-token") {
       setStep("avatar");
       return;
     }
@@ -386,35 +397,48 @@ export function AgentCreateWizardModal({
                 />
               </section>
 
-              {agentInvite ? (
-                <div className="mt-6 rounded-xl border border-border/60 bg-muted/30 p-4 text-sm">
-                  <p className="font-medium text-foreground">
-                    Manager access token {agentInvite.reused ? "(existing)" : "generated"}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Bagikan ke {agentInvite.userId} supaya bisa login dashboard dan hanya melihat
-                    profile ini. Token hanya ditampilkan sekali saat dibuat — copy sekarang.
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <code className="flex-1 truncate rounded-md bg-muted px-2.5 py-1.5 text-xs">
-                      {agentInvite.token}
-                    </code>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void navigator.clipboard?.writeText(agentInvite.token);
-                      }}
-                      className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
-                    >
-                      Copy
-                    </button>
-                  </div>
-                </div>
-              ) : null}
               <div className="mt-6 rounded-xl border border-border/45 bg-muted/20 p-4 text-sm text-muted-foreground">
                 Creating the agent in this step makes it available in Hermes immediately so the
                 wizard can save the full profile through the gateway in later steps.
               </div>
+            </div>
+          </div>
+        ) : step === "identity-token" && createdAgentId ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-6">
+            <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4">
+              <section className="space-y-3">
+                <h3 className="text-sm font-medium text-foreground">Manager access token</h3>
+                <div className="text-xs text-muted-foreground">
+                  Bagikan token ini ke manager profil <b>{createdAgentId}</b> supaya dia bisa login
+                  dashboard dan hanya melihat profilnya sendiri.
+                </div>
+                {agentInvite ? (
+                  <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {agentInvite.userId} · {agentInvite.reused ? "existing token" : "new token — shown once"}
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <code className="flex-1 truncate rounded-md bg-muted px-2.5 py-1.5 text-xs">
+                        {agentInvite.token}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(agentInvite.token);
+                        }}
+                        className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border/45 bg-muted/20 p-4 text-xs text-muted-foreground">
+                    Token belum ter-generate (invite service tidak tersedia saat create). Profil
+                    tetap aktif; token bisa dimintakan operator lewat server.
+                  </div>
+                )}
+              </section>
             </div>
           </div>
         ) : createdAgentId ? (
