@@ -470,6 +470,35 @@ function createHermesAgentUpstream(options) {
 
   // --- method dispatch ------------------------------------------------------
 
+  /** Shared REST helper for hermes serve /api/profiles endpoints (v0.19 backends). */
+  const hermesRestBase = () => {
+    const url = new URL(client.url.replace(/^ws/, "http"));
+    url.search = "";
+    return url.origin;
+  };
+
+  const hermesRestProfileDelete = async (profileName) => {
+    const response = await fetch(`${hermesRestBase()}/api/profiles/${encodeURIComponent(profileName)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${asString(token)}` },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+    return payload;
+  };
+
+  const hermesRestProfileCreate = async (profileName) => {
+    const response = await fetch(`${hermesRestBase()}/api/profiles`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${asString(token)}` },
+      body: JSON.stringify({ name: profileName }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+    await loadAgentRoster();
+    return payload;
+  };
+
   /** Load the fleet once per connection; a backend without profiles keeps one agent. */
   /**
    * Fallback roster via hermes serve REST (/api/profiles) when the backend
@@ -477,9 +506,7 @@ function createHermesAgentUpstream(options) {
    */
   const loadAgentRosterViaRest = async () => {
     try {
-      const url = new URL(client.url.replace(/^ws/, "http"));
-      url.search = "";
-      const response = await fetch(url.origin + "/api/profiles", {
+      const response = await fetch(`${hermesRestBase()}/api/profiles`, {
         headers: { Authorization: `Bearer ${asString(token)}` },
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -617,6 +644,45 @@ function createHermesAgentUpstream(options) {
             role,
           })),
         });
+
+      case "agents.delete": {
+        // hermes-agent profiles = Hermes3D agents. Backends without the fleet
+        // RPC expose profile CRUD over REST instead.
+        const targetId = asString(p.agentId) || asString(p.id);
+        if (!targetId) return resErr(id, "hermes_agent.delete_missing_id", "agents.delete requires agentId.");
+        const target = agentRoster.find((a) => a.id === targetId);
+        if (!target) return resErr(id, "hermes_agent.delete_not_found", `Agent "${targetId}" is not in the roster.`);
+        if (target.isDefault) {
+          return resErr(id, "hermes_agent.delete_default", "The default profile cannot be deleted.");
+        }
+        try {
+          await hermesRestProfileDelete(target.profile || targetId);
+          await loadAgentRoster();
+          return resOk(id, { ok: true, agentId: targetId, removedBindings: 0 });
+        } catch (err) {
+          return resErr(id, "hermes_agent.delete_failed", errorMessage(err));
+        }
+      }
+
+      case "agents.create": {
+        const createdName = asString(p.name);
+        if (!createdName) return resErr(id, "hermes_agent.create_missing_name", "agents.create requires name.");
+        try {
+          await hermesRestProfileCreate(createdName);
+          const created = agentRoster.find((a) => a.id === createdName) ?? { id: createdName };
+          return resOk(id, { ok: true, agentId: created.id, name: createdName, workspace: created.workspace ?? "" });
+        } catch (err) {
+          return resErr(id, "hermes_agent.create_failed", errorMessage(err));
+        }
+      }
+
+      case "agents.update": {
+        // Rename/description updates are profile-level on v0.19 backends.
+        const targetId = asString(p.agentId);
+        const target = agentRoster.find((a) => a.id === targetId);
+        if (!target) return resErr(id, "hermes_agent.update_not_found", `Agent "${targetId}" is not in the roster.`);
+        return resOk(id, { ok: true, agentId: targetId, name: target.name });
+      }
 
       case "agents.files.get":
         return resOk(id, { file: { missing: true } });
