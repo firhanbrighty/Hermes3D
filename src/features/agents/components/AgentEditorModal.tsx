@@ -8,6 +8,7 @@ import {
   Database,
   FileText,
   HeartPulse,
+  KeyRound,
   Palette,
   Shield,
   Trash2,
@@ -23,8 +24,9 @@ import type { GatewayClient } from "@/lib/gateway/GatewayClient";
 import type { AgentFileName } from "@/lib/agents/agentFiles";
 import { AGENT_FILE_META } from "@/lib/agents/agentFiles";
 import { renameGatewayAgent } from "@/lib/gateway/agentConfig";
+import { AgentAccessTokenSection } from "@/features/agents/components/inspect/AgentAccessTokenSection";
 
-export type AgentEditorSection = "avatar" | AgentFileName;
+export type AgentEditorSection = "avatar" | "access" | AgentFileName;
 
 type AgentEditorModalProps = {
   open: boolean;
@@ -59,6 +61,12 @@ const editorSections: Array<{
     label: "Avatar",
     hint: "Office appearance.",
     icon: Palette,
+  },
+  {
+    id: "access",
+    label: "Access",
+    hint: "Manager dashboard login token.",
+    icon: KeyRound,
   },
   {
     id: "SOUL.md",
@@ -236,6 +244,17 @@ export const AgentEditorModal = ({
                 onCancel={onClose}
                 onSave={(profile) => onAvatarSave(agent.agentId, profile)}
               />
+            ) : activeSection === "access" ? (
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-6">
+                <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4">
+                  <AgentAccessTokenSection agentId={agent.agentId} />
+                  <p className="text-xs text-muted-foreground">
+                    Token ini dipakai manager untuk login di{" "}
+                    <span className="font-mono">/studio-login</span> — dashboard mereka hanya
+                    menampilkan profil <b>{agent.agentId}</b>.
+                  </p>
+                </div>
+              </div>
             ) : client ? (
               <div className="flex min-h-0 flex-1 flex-col">
                 <div className="border-b border-border/40 px-6 py-4">
