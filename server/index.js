@@ -114,14 +114,25 @@ async function main() {
 
   const httpsCert = useHttps ? await generateHttpsCert() : null;
 
+  const withStudioUser = (req) => {
+    const authState = accessGate.getAuthState(req);
+    if (authState?.user) {
+      req.headers["x-studio-user-id"] = String(authState.user.id);
+      req.headers["x-studio-user-scope"] =
+        authState.user.scope?.kind === "all" ? "all" : (authState.user.scope?.names ?? []).join(",");
+    }
+  };
+
   const createServer = () =>
     useHttps
       ? https.createServer(httpsCert, (req, res) => {
           if (accessGate.handleHttp(req, res)) return;
+          withStudioUser(req);
           handle(req, res);
         })
       : http.createServer((req, res) => {
           if (accessGate.handleHttp(req, res)) return;
+          withStudioUser(req);
           handle(req, res);
         });
 

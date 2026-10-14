@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { findUserByToken } = require("./user-registry");
 
 
 const parseCookies = (header) => {
@@ -87,20 +88,26 @@ function createAccessGate(options) {
   const rateLimiter = createRateLimiter(10, 60_000);
 
   const getAuthState = (req) => {
-    if (!enabled) return { authorized: true, limited: false };
+    if (!enabled) return { authorized: true, limited: false, user: null };
     const ip = resolveClientIp(req);
     const cookieHeader = req.headers?.cookie;
     const cookies = parseCookies(cookieHeader);
-    const authorized = safeCompare(cookies[cookieName] || "", token);
+    const presented = cookies[cookieName] || "";
+
+    // Per-user registry: prefer a matching user token, fall back to the
+    // legacy studio token (which gets owner scope).
+    const user = findUserByToken(presented);
+    const isLegacyToken = safeCompare(presented, token);
+    const authorized = Boolean(user) || isLegacyToken;
     if (authorized) {
       rateLimiter.reset(ip);
-      return { authorized: true, limited: false };
+      return { authorized: true, limited: false, user: user ?? { id: "master", label: "Master", scope: { kind: "all" } } };
     }
     if (rateLimiter.isLimited(ip)) {
-      return { authorized: false, limited: true };
+      return { authorized: false, limited: true, user: null };
     }
     rateLimiter.recordFailure(ip);
-    return { authorized: false, limited: rateLimiter.isLimited(ip) };
+    return { authorized: false, limited: rateLimiter.isLimited(ip), user: null };
   };
 
   const safeNextFromUrl = (rawUrl) => {
@@ -246,7 +253,7 @@ function createAccessGate(options) {
     return getAuthState(req).authorized;
   };
 
-  return { enabled, handleHttp, allowUpgrade };
+  return { enabled, handleHttp, allowUpgrade, getAuthState };
 }
 
 module.exports = { createAccessGate };

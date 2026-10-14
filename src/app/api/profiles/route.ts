@@ -56,6 +56,7 @@ export type ProfilesSnapshot = {
   timestamp: string;
   connected: boolean;
   source: "hermes-rest" | "gateway-fleet";
+  viewerId?: string | null;
   profiles: ProfileRecord[];
 };
 
@@ -221,7 +222,7 @@ const loadProfilesViaGatewayFleet = async (params: {
   }
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   const settings = loadStudioSettings();
   const gatewayUrl = asTrimmedString(settings.gateway?.url);
   if (!gatewayUrl) {
@@ -229,12 +230,28 @@ export async function GET() {
   }
   const token = asTrimmedString(settings.gateway?.token);
 
+  // Scope: "all" bawaan master token; per-user scope dari access gate.
+  const scopeHeader = asTrimmedString(request.headers.get("x-studio-user-scope")).toLowerCase();
+  const userId = asTrimmedString(request.headers.get("x-studio-user-id"));
+  const scopeNames = scopeHeader === "all" || !scopeHeader ? null : scopeHeader.split(",").map(s => s.trim()).filter(Boolean);
+
+  const filterByScope = (snapshot: ProfilesSnapshot): ProfilesSnapshot => {
+    if (!scopeNames) return snapshot;
+    return {
+      ...snapshot,
+      viewerId: userId || null,
+      profiles: snapshot.profiles.filter((profile) =>
+        scopeNames.some((name) => name.toLowerCase() === profile.agentId.toLowerCase()),
+      ),
+    };
+  };
+
   try {
     const snapshot = await loadProfilesViaHermesRest({
       baseUrl: restBaseUrlFromGatewayUrl(gatewayUrl),
       token,
     });
-    return NextResponse.json(snapshot, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(filterByScope(snapshot), { headers: { "Cache-Control": "no-store" } });
   } catch (restError) {
     const restMessage = restError instanceof Error ? restError.message : "hermes REST failed";
     console.warn("[profiles] Hermes REST unavailable, falling back to gateway fleet.", {
@@ -244,7 +261,7 @@ export async function GET() {
 
   try {
     const snapshot = await loadProfilesViaGatewayFleet({ gatewayUrl, token });
-    return NextResponse.json(snapshot, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(filterByScope(snapshot), { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load profile roster.";
     console.error("[profiles] Failed to load profile roster.", { error: message });

@@ -30,6 +30,7 @@ type ProfilesSnapshot = {
   timestamp: string;
   connected: boolean;
   source: "hermes-rest" | "gateway-fleet";
+  viewerId?: string | null;
   profiles: ProfileRecord[];
 };
 
@@ -106,7 +107,8 @@ export default function ProfilesPage() {
             <h1 className="text-2xl font-semibold tracking-tight">Hermes Profiles</h1>
             <p className="mt-1 text-sm text-[var(--muted-foreground)]">
               Active profiles from the shared Hermes environment
-              {snapshot ? ` · source: ${snapshot.source}` : ""}.
+              {snapshot ? ` · source: ${snapshot.source}` : ""}
+              {snapshot?.viewerId ? ` · signed in as ${snapshot.viewerId}` : ""}.
             </p>
           </div>
           <div className="flex items-center gap-2 text-sm">
