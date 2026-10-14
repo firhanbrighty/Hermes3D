@@ -67,7 +67,7 @@ const titleCaseProfileName = (name: string) =>
   name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
 
 const roleFromDescription = (description: string) =>
-  description.includes("—") ? description.split("—").slice(1).join("—").trim() : description;
+  description.includes("—") ? description.split("—").slice(1).join("—").trim() : "";
 
 const fetchWithTimeout = async (url: string, headers: HeadersInit, timeoutMs: number) => {
   const controller = new AbortController();
@@ -113,9 +113,11 @@ const loadProfilesViaHermesRest = async (params: {
       .filter((session) => (asTrimmedString(session.profile) || "default") === profileName)
       .sort((a, b) => (b.ended_at ?? b.started_at ?? 0) - (a.ended_at ?? a.started_at ?? 0));
     const lastEndedAtMs = ownSessions[0]?.ended_at ?? ownSessions[0]?.started_at ?? null;
+    // Display label: description part before "—" (rename flow), else title-cased name.
+    const displayLabel = description.split("—")[0].trim() || titleCaseProfileName(profileName);
     return {
       agentId: profileName,
-      name: titleCaseProfileName(profileName),
+      name: displayLabel,
       emoji: profile.is_default === true ? "🤖" : "🧑‍💻",
       role: roleFromDescription(description),
       workspace: asTrimmedString(profile.path),
