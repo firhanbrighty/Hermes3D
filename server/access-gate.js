@@ -103,33 +103,120 @@ function createAccessGate(options) {
     return { authorized: false, limited: rateLimiter.isLimited(ip) };
   };
 
+  const buildLoginHtml = (nextPath, errorText) => {
+    const escape = (value) =>
+      String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const safeNext = escape(nextPath || "/");
+    const errorHtml = errorText
+      ? `<p class="error">${escape(errorText)}</p>`
+      : "";
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Studio access</title>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #10141b; color: #e8ecf1; font-family: system-ui, sans-serif; }
+  form { background: #171d27; border: 1px solid #2a3342; border-radius: 12px; padding: 28px; width: min(360px, 90vw); }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  p.hint { margin: 0 0 18px; font-size: 13px; color: #9aa7b8; }
+  input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3342; background: #10141b; color: inherit; font-size: 14px; }
+  button { width: 100%; margin-top: 12px; padding: 10px 12px; border: 0; border-radius: 8px; background: #4c8fd6; color: #0b1219; font-weight: 600; font-size: 14px; cursor: pointer; }
+  .error { color: #ff8f8f; font-size: 13px; margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<form method="POST" action="/studio-login">
+  <h1>Hermes3D Studio</h1>
+  <p class="hint">Paste the studio access token to continue.</p>
+  ${errorHtml}
+  <input type="hidden" name="next" value="${safeNext}">
+  <input type="password" name="token" placeholder="Access token" autofocus autocomplete="off">
+  <button type="submit">Sign in</button>
+</form>
+</body>
+</html>`;
+  };
+
+  const readBody = (req, cb, maxBytes = 8192) => {
+    let body = "";
+    let overflow = false;
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > maxBytes) {
+        overflow = true;
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (overflow) return;
+      cb(body);
+    });
+    req.on("error", () => {});
+  };
+
   const handleHttp = (req, res) => {
     if (!enabled) return false;
+    const url = String(req.url || "/");
     const auth = getAuthState(req);
-    if (!auth.authorized) {
-      const statusCode = auth.limited ? 429 : 401;
-      if (String(req.url || "/").startsWith("/api/")) {
-        res.statusCode = statusCode;
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            error: auth.limited
-              ? "Too many failed studio access attempts. Wait a minute and retry."
-              : "Studio access token required. Send the configured Studio access cookie and retry.",
-          })
-        );
-      } else {
-        res.statusCode = statusCode;
-        res.setHeader("Content-Type", "text/plain");
-        res.end(
-          auth.limited
-            ? "Too many failed studio access attempts. Wait a minute and retry."
-            : "Studio access token required. Set the studio_access cookie to access this page."
-        );
+    if (auth.authorized) return false;
+
+    // Login roundtrip: render form on GET, set cookie on valid POST.
+    if (url === "/studio-login") {
+      if (req.method === "POST") {
+        readBody(req, (raw) => {
+          const params = new URLSearchParams(raw);
+          const token = String(params.get("token") || "").trim();
+          const nextPath = String(params.get("next") || "/");
+          const safeNext = nextPath.startsWith("/") ? nextPath : "/";
+          if (token && safeCompare(token, String(options?.token ?? "").trim())) {
+            res.statusCode = 303;
+            res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+            res.setHeader("Location", safeNext);
+            res.end();
+          } else if (auth.limited) {
+            res.statusCode = 429;
+            res.setHeader("Content-Type", "text/html");
+            res.end(buildLoginHtml(safeNext, "Too many attempts. Wait a minute and retry."));
+          } else {
+            rateLimiter.recordFailure(resolveClientIp(req));
+            res.statusCode = 401;
+            res.setHeader("Content-Type", "text/html");
+            res.end(buildLoginHtml(safeNext, "Invalid access token."));
+          }
+        });
+        return true;
       }
+      res.statusCode = 401;
+      res.setHeader("Content-Type", "text/html");
+      res.end(buildLoginHtml("/", ""));
       return true;
     }
-    return false;
+
+    if (auth.limited) {
+      res.setHeader("Location", "/studio-login");
+      res.statusCode = 307;
+    }
+
+    if (url.startsWith("/api/")) {
+      res.statusCode = auth.limited ? 429 : 401;
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          error: auth.limited
+            ? "Too many failed studio access attempts. Wait a minute and retry."
+            : "Studio access token required. Send the configured Studio access cookie and retry.",
+        })
+      );
+      return true;
+    }
+
+    // Browser page: redirect to the login form so no DevTools needed.
+    res.statusCode = 302;
+    res.setHeader("Location", `/studio-login?next=${encodeURIComponent(url)}`);
+    res.end();
+    return true;
   };
 
   const allowUpgrade = (req) => {
