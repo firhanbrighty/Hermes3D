@@ -256,6 +256,9 @@ function createHermesAgentUpstream(options) {
    * because the set only changes when the operator creates or deletes one.
    */
   let agentRoster = [fallbackAgent()];
+  // True only when the fleet profile RPC (profiles.list) answered; when the
+  // REST fallback feeds the roster, agents.list refreshes it each call.
+  let rosterFromFleetRpc = false;
   let defaultAgentId = AGENT_ID;
   /** Optional feed of turns driven from other clients; see ./office-speech.js. */
   let officeSpeech = null;
@@ -560,13 +563,16 @@ function createHermesAgentUpstream(options) {
       if (mapped.length > 0) {
         agentRoster = mapped;
         defaultAgentId = resolveDefaultAgentId(mapped);
+        rosterFromFleetRpc = true;
         log(`[hermes-agent] ${mapped.length} profile(s) mapped to agents: ${mapped.map((a) => a.id).join(", ")}`);
         return;
       }
       log("[hermes-agent] profiles.list returned nothing; trying REST roster");
+      rosterFromFleetRpc = false;
       await loadAgentRosterViaRest();
     } catch (err) {
       log(`[hermes-agent] profiles.list unavailable (${errorMessage(err)}); trying REST roster`);
+      rosterFromFleetRpc = false;
       await loadAgentRosterViaRest();
     }
   };
@@ -662,6 +668,9 @@ function createHermesAgentUpstream(options) {
 
     switch (method) {
       case "agents.list":
+        // Roster can be stale against disk (REST roster reload is async);
+        // refresh once per list call when the backend predates the fleet RPC.
+        if (!rosterFromFleetRpc) await loadAgentRoster();
         return resOk(id, {
           defaultId: defaultAgentId,
           mainKey: MAIN_KEY,
