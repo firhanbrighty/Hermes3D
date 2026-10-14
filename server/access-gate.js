@@ -103,6 +103,18 @@ function createAccessGate(options) {
     return { authorized: false, limited: rateLimiter.isLimited(ip) };
   };
 
+  const safeNextFromUrl = (rawUrl) => {
+    const start = rawUrl.indexOf("next=");
+    if (start === -1) return "/";
+    const raw = rawUrl.slice(start + 5);
+    try {
+      const decoded = decodeURIComponent(raw);
+      return decoded.startsWith("/") && !decoded.startsWith("/studio-login") ? decoded : "/";
+    } catch {
+      return "/";
+    }
+  };
+
   const buildLoginHtml = (nextPath, errorText) => {
     const escape = (value) =>
       String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -162,13 +174,18 @@ function createAccessGate(options) {
     const auth = getAuthState(req);
     if (auth.authorized) return false;
 
-    // The login form must never redirect to itself.
-    if (url === "/studio-login" || url.startsWith("/studio-login?")) {
-      return false;
+    // The login form GET must render from the gate itself (Next.js has no
+    // /studio-login page); POST is handled below.
+    const isLoginPath = url === "/studio-login" || url.startsWith("/studio-login?");
+    if (isLoginPath && req.method !== "POST") {
+      res.statusCode = 401;
+      res.setHeader("Content-Type", "text/html");
+      res.end(buildLoginHtml(safeNextFromUrl(url), ""));
+      return true;
     }
 
     // Login roundtrip: set cookie on valid POST (unauthorized POSTs land here).
-    if (url === "/studio-login" && req.method === "POST") {
+    if (isLoginPath && req.method === "POST") {
       readBody(req, (raw) => {
         const params = new URLSearchParams(raw);
         const token = String(params.get("token") || "").trim();
