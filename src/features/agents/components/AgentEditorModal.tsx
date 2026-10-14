@@ -25,6 +25,7 @@ import type { AgentFileName } from "@/lib/agents/agentFiles";
 import { AGENT_FILE_META } from "@/lib/agents/agentFiles";
 import { renameGatewayAgent } from "@/lib/gateway/agentConfig";
 import { AgentAccessTokenSection } from "@/features/agents/components/inspect/AgentAccessTokenSection";
+import { useViewerIsOwner } from "@/features/agents/components/inspect/useViewerIsOwner";
 
 export type AgentEditorSection = "avatar" | "access" | AgentFileName;
 
@@ -118,6 +119,7 @@ export const AgentEditorModal = ({
   onDelete,
   onNavigateAgent,
 }: AgentEditorModalProps) => {
+  const viewerSeesAll = useViewerIsOwner();
   const [activeSection, setActiveSection] = useState<AgentEditorSection>(initialSection);
   const activeAgentIndex = agents.findIndex((entry) => entry.agentId === agent.agentId);
   const previousAgent =
@@ -214,7 +216,7 @@ export const AgentEditorModal = ({
                 );
               })}
             </div>
-            {onDelete ? (
+            {onDelete && viewerSeesAll ? (
               <div className="border-t border-border/40 p-3">
                 <button
                   type="button"

@@ -25,29 +25,9 @@ import { formatCronPayload, formatCronSchedule, type CronJobSummary } from "@/li
 import type { SkillStatusReport } from "@/lib/skills/types";
 import type { StudioGatewayAdapterType } from "@/lib/studio/settings";
 import { AgentAccessTokenSection } from "@/features/agents/components/inspect/AgentAccessTokenSection";
+import { useViewerIsOwner } from "@/features/agents/components/inspect/useViewerIsOwner";
 
 /** CEO-only: viewer scope from the access gate (all = master/CEO role). */
-const useViewerIsOwner = (): boolean => {
-  const [isOwner, setIsOwner] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const response = await fetch("/api/studio/viewer", { cache: "no-store" });
-        if (!response.ok) return;
-        const payload = (await response.json()) as { scope?: string };
-        if (!cancelled && payload.scope === "all") setIsOwner(true);
-      } catch {
-        // not owner
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return isOwner;
-};
-
 export type AgentSettingsPanelProps = {
   agent: AgentState;
   mode?: "capabilities" | "skills" | "system" | "automations" | "advanced";

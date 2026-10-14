@@ -182,6 +182,7 @@ function createGatewayProxy(options) {
   const {
     loadUpstreamSettings,
     allowWs = (req) => resolvePathname(req.url) === "/api/gateway/ws",
+    getAuthState = null,
     log = () => {},
     logError = (msg, err) => console.error(msg, err),
     upstreamHandshakeTimeoutMs = DEFAULT_UPSTREAM_HANDSHAKE_TIMEOUT_MS,
@@ -195,9 +196,26 @@ function createGatewayProxy(options) {
 
   const wss = new WebSocketServer({ noServer: true, verifyClient });
 
-  wss.on("connection", (browserWs) => {
+  wss.on("connection", (browserWs, req) => {
     let upstreamWs = null;
     let upstreamReady = false;
+    // Per-connection viewer scope: "all" = CEO/master; list = manager scope.
+    let viewerScope = "all";
+    if (getAuthState && req) {
+      try {
+        const auth = getAuthState(req);
+        if (auth?.authorized && auth.user) {
+          viewerScope = auth.user.scope?.kind === "all" ? "all" : (auth.user.scope?.names ?? []).join(",");
+        } else if (!auth?.authorized) {
+          // Gate already handled HTTP; an unauthorized WS shouldn't be here.
+          viewerScope = "none";
+        }
+      } catch {
+        viewerScope = "none";
+      }
+    }
+    /** CEO-only gateway RPC methods (dangerous fleet operations). */
+    const CEO_ONLY_METHODS = new Set(["agents.delete", "agents.create", "agents.update"]);
     let upstreamUrl = "";
     let upstreamToken = "";
     let upstreamAdapterType = "";
@@ -228,6 +246,22 @@ function createGatewayProxy(options) {
     const sendToBrowser = (frame) => {
       if (browserWs.readyState !== WebSocket.OPEN) return;
       browserWs.send(JSON.stringify(frame));
+    };
+
+    /** Reject a CEO-only RPC issued by a scoped viewer. */
+    const rejectCeoOnlyMethod = (parsed) => {
+      if (parsed?.type !== "req" || !CEO_ONLY_METHODS.has(parsed.method)) return false;
+      if (viewerScope === "all") return false;
+      const method = parsed.method;
+      log(`[gateway-proxy] rejecting ${method} for scoped viewer (scope=${viewerScope || "none"})`);
+      sendToBrowser(
+        buildErrorResponse(
+          parsed.id,
+          "studio.owner_only",
+          `${method} is restricted to the owner (CEO) account. Ask the CEO to perform this action.`,
+        ),
+      );
+      return true;
     };
 
     const sendConnectError = (code, message) => {
@@ -513,6 +547,8 @@ function createGatewayProxy(options) {
         closeBoth(1013, "upstream not ready");
         return;
       }
+
+      if (rejectCeoOnlyMethod(parsed)) return;
 
       if (parsed.type === "req" && parsed.method === "connect" && !connectResponseSent) {
         pendingConnectFrame = null;

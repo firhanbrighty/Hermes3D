@@ -93,6 +93,7 @@ async function main() {
       const settings = loadUpstreamGatewaySettings(process.env);
       return { url: settings.url, token: settings.token, adapterType: settings.adapterType };
     },
+    getAuthState: (req) => accessGate.getAuthState(req),
     log: (message) => console.info(message),
     logError: (message, error) => console.error(message, error),
     allowWs: (req) => {
