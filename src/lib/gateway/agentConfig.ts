@@ -382,9 +382,13 @@ export const createGatewayAgent = async (params: {
     throw new Error("Agent name is required.");
   }
 
+  // hermes-agent pre-fleet backends (v0.19 line) have no agents.create RPC;
+  // create a real hermes profile instead via the Studio REST bridge.
   const snapshot = await params.client.call<GatewayConfigSnapshot>("config.get", {});
   const configPath = typeof snapshot.path === "string" ? snapshot.path.trim() : "";
   if (!configPath) {
+    const viaRest = await createProfileViaRest(trimmed);
+    if (viaRest) return viaRest;
     throw new Error(
       'Gateway did not return a config path; cannot compute a default workspace for "agents.create".',
     );
@@ -407,6 +411,23 @@ export const createGatewayAgent = async (params: {
     throw new Error("Gateway returned an invalid agents.create response (missing agentId).");
   }
   return { id: agentId, name: trimmed };
+};
+
+const createProfileViaRest = async (name: string): Promise<ConfigAgentEntry | null> => {
+  try {
+    const response = await fetch("/api/gateway/agent-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as { agentId?: string };
+    const agentId = typeof payload.agentId === "string" ? payload.agentId.trim() : "";
+    if (!agentId) return null;
+    return { id: agentId, name };
+  } catch {
+    return null;
+  }
 };
 
 export const deleteGatewayAgent = async (params: {
