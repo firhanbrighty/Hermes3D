@@ -506,6 +506,8 @@ function createHermesAgentUpstream(options) {
   };
 
   const hermesRestProfileRename = async (oldName, newName) => {
+    // Unused today: hermes profile names are lowercase slugs, so UI display
+    // renames route to description labels. Kept for future slug-rename needs.
     const response = await fetch(
       `${hermesRestBase()}/api/profiles/${encodeURIComponent(oldName)}`,
       {
@@ -521,6 +523,9 @@ function createHermesAgentUpstream(options) {
     if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
     return payload;
   };
+
+  // Kept for future slug-rename needs; not referenced by agents.update today.
+  void hermesRestProfileRename;
 
   /** Load the fleet once per connection; a backend without profiles keeps one agent. */
   /**
@@ -712,26 +717,24 @@ function createHermesAgentUpstream(options) {
           ? `${nextLabel} — ${oldDescription}`
           : nextLabel;
         try {
-          if (newName && newName !== target.id && newName !== target.name) {
-            await hermesRestProfileRename(target.profile || target.id, newName);
-            await loadAgentRoster();
-          } else {
-            const response = await fetch(
-              `${hermesRestBase()}/api/profiles/${encodeURIComponent(target.profile || target.id)}/description`,
-              {
-                method: "PUT",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${asString(token)}`,
-                },
-                body: JSON.stringify({ description: descriptionValue }),
+          // hermes profile names are lowercase slugs only; display names with
+          // spaces/caps always route to the description label instead of a
+          // structural rename.
+          const response = await fetch(
+            `${hermesRestBase()}/api/profiles/${encodeURIComponent(target.profile || target.id)}/description`,
+            {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${asString(token)}`,
               },
-            );
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            await loadAgentRoster();
-          }
-          const updated = agentRoster.find((a) => a.id === targetId || a.id === newName);
-          return resOk(id, { ok: true, agentId: updated?.id ?? targetId, name: updated?.name ?? nextLabel });
+              body: JSON.stringify({ description: descriptionValue }),
+            },
+          );
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          await loadAgentRoster();
+          const updated = agentRoster.find((a) => a.id === targetId);
+          return resOk(id, { ok: true, agentId: targetId, name: updated?.name ?? nextLabel });
         } catch (err) {
           return resErr(id, "hermes_agent.update_failed", errorMessage(err));
         }
