@@ -162,51 +162,56 @@ function createAccessGate(options) {
     const auth = getAuthState(req);
     if (auth.authorized) return false;
 
-    // Login roundtrip: render form on GET, set cookie on valid POST.
-    if (url === "/studio-login") {
-      if (req.method === "POST") {
-        readBody(req, (raw) => {
-          const params = new URLSearchParams(raw);
-          const token = String(params.get("token") || "").trim();
-          const nextPath = String(params.get("next") || "/");
-          const safeNext = nextPath.startsWith("/") ? nextPath : "/";
-          if (token && safeCompare(token, String(options?.token ?? "").trim())) {
-            res.statusCode = 303;
-            res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
-            res.setHeader("Location", safeNext);
-            res.end();
-          } else if (auth.limited) {
-            res.statusCode = 429;
-            res.setHeader("Content-Type", "text/html");
-            res.end(buildLoginHtml(safeNext, "Too many attempts. Wait a minute and retry."));
-          } else {
-            rateLimiter.recordFailure(resolveClientIp(req));
-            res.statusCode = 401;
-            res.setHeader("Content-Type", "text/html");
-            res.end(buildLoginHtml(safeNext, "Invalid access token."));
-          }
-        });
-        return true;
-      }
-      res.statusCode = 401;
-      res.setHeader("Content-Type", "text/html");
-      res.end(buildLoginHtml("/", ""));
+    // The login form must never redirect to itself.
+    if (url === "/studio-login" || url.startsWith("/studio-login?")) {
+      return false;
+    }
+
+    // Login roundtrip: set cookie on valid POST (unauthorized POSTs land here).
+    if (url === "/studio-login" && req.method === "POST") {
+      readBody(req, (raw) => {
+        const params = new URLSearchParams(raw);
+        const token = String(params.get("token") || "").trim();
+        const nextPath = String(params.get("next") || "/");
+        const safeNext = nextPath.startsWith("/") && !nextPath.startsWith("/studio-login") ? nextPath : "/";
+        if (token && safeCompare(token, String(options?.token ?? "").trim())) {
+          res.statusCode = 303;
+          res.setHeader("Set-Cookie", `${cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`);
+          res.setHeader("Location", safeNext);
+          res.end();
+        } else if (auth.limited) {
+          res.statusCode = 429;
+          res.setHeader("Content-Type", "text/html");
+          res.end(buildLoginHtml(safeNext, "Too many attempts. Wait a minute and retry."));
+        } else {
+          rateLimiter.recordFailure(resolveClientIp(req));
+          res.statusCode = 401;
+          res.setHeader("Content-Type", "text/html");
+          res.end(buildLoginHtml(safeNext, "Invalid access token."));
+        }
+      });
       return true;
     }
 
     if (auth.limited) {
-      res.setHeader("Location", "/studio-login");
-      res.statusCode = 307;
+      if (url.startsWith("/api/")) {
+        res.statusCode = 429;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Too many failed studio access attempts. Wait a minute and retry." }));
+        return true;
+      }
+      res.statusCode = 429;
+      res.setHeader("Content-Type", "text/html");
+      res.end(buildLoginHtml("/", "Too many attempts. Wait a minute and retry."));
+      return true;
     }
 
     if (url.startsWith("/api/")) {
-      res.statusCode = auth.limited ? 429 : 401;
+      res.statusCode = 401;
       res.setHeader("Content-Type", "application/json");
       res.end(
         JSON.stringify({
-          error: auth.limited
-            ? "Too many failed studio access attempts. Wait a minute and retry."
-            : "Studio access token required. Send the configured Studio access cookie and retry.",
+          error: "Studio access token required. Send the configured Studio access cookie and retry.",
         })
       );
       return true;
