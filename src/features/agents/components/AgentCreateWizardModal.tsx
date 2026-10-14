@@ -176,6 +176,7 @@ export function AgentCreateWizardModal({
     buildInitialDraft(suggestedName),
   );
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
+  const [agentInvite, setAgentInvite] = useState<{ userId: string; token: string; reused: boolean } | null>(null);
   const [draftAvatarProfile, setDraftAvatarProfile] = useState<AgentAvatarProfile>(() =>
     createDefaultAgentAvatarProfile(randomUUID()),
   );
@@ -210,6 +211,24 @@ export function AgentCreateWizardModal({
         });
         if (!agentId) return;
         setCreatedAgentId(agentId);
+        // Mint access token buat profile ini: dipakai manager login dashboard.
+        try {
+          const response = await fetch("/api/gateway/agent-create-invite", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ agentId, label: draft.identity.name }),
+          });
+          if (response.ok) {
+            const payload = (await response.json()) as {
+              userId?: string; token?: string; reused?: boolean;
+            };
+            if (payload.token && payload.userId) {
+              setAgentInvite({ userId: payload.userId, token: payload.token, reused: Boolean(payload.reused) });
+            }
+          }
+        } catch {
+          // Invite tidak kritis; profil tetap terpakai.
+        }
       }
       setStep("avatar");
       return;
@@ -367,6 +386,31 @@ export function AgentCreateWizardModal({
                 />
               </section>
 
+              {agentInvite ? (
+                <div className="mt-6 rounded-xl border border-border/60 bg-muted/30 p-4 text-sm">
+                  <p className="font-medium text-foreground">
+                    Manager access token {agentInvite.reused ? "(existing)" : "generated"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Bagikan ke {agentInvite.userId} supaya bisa login dashboard dan hanya melihat
+                    profile ini. Token hanya ditampilkan sekali saat dibuat — copy sekarang.
+                  </p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="flex-1 truncate rounded-md bg-muted px-2.5 py-1.5 text-xs">
+                      {agentInvite.token}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(agentInvite.token);
+                      }}
+                      className="rounded-md border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+              ) : null}
               <div className="mt-6 rounded-xl border border-border/45 bg-muted/20 p-4 text-sm text-muted-foreground">
                 Creating the agent in this step makes it available in Hermes immediately so the
                 wizard can save the full profile through the gateway in later steps.
