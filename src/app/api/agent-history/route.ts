@@ -84,11 +84,21 @@ const buildPreview = (payload: HermesRestMessagesResponse) => {
 };
 
 export async function GET(request: Request) {
-  if (resolveViewerScope(request) !== "all") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const scope = resolveViewerScope(request);
+  const agentIdParam = asTrimmedString(
+    new URL(request.url).searchParams.get("agentId"),
+  );
+  // Manager (scoped viewer) boleh membaca riwayat profilnya sendiri; CEO boleh semua.
+  if (scope !== "all") {
+    const scopeList = scope.split(",").filter(Boolean);
+    const owns = (agentIdParam || "").length > 0 &&
+      scopeList.some((name) => name.toLowerCase() === agentIdParam.toLowerCase());
+    if (!owns) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
   }
 
-  const agentId = asTrimmedString(new URL(request.url).searchParams.get("agentId"));
+  const agentId = agentIdParam;
   if (!agentId) {
     return NextResponse.json({ error: "invalid_agent_id" }, { status: 400 });
   }
