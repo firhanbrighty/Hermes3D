@@ -350,6 +350,7 @@ function createGatewayProxy(options) {
           url: upstreamUrl,
           token: upstreamToken,
           handshakeTimeoutMs: upstreamHandshakeTimeoutMs,
+          viewerScope,
           log,
           logError,
         });

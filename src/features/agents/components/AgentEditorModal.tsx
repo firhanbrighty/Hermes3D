@@ -13,6 +13,7 @@ import {
   Shield,
   Trash2,
   UserRound,
+  UsersRound,
   Wrench,
   X,
 } from "lucide-react";
@@ -25,9 +26,10 @@ import type { AgentFileName } from "@/lib/agents/agentFiles";
 import { AGENT_FILE_META } from "@/lib/agents/agentFiles";
 import { renameGatewayAgent } from "@/lib/gateway/agentConfig";
 import { AgentAccessTokenSection } from "@/features/agents/components/inspect/AgentAccessTokenSection";
+import { AgentTeamSection } from "@/features/agents/components/inspect/AgentTeamSection";
 import { useViewerIsOwner } from "@/features/agents/components/inspect/useViewerIsOwner";
 
-export type AgentEditorSection = "avatar" | "access" | AgentFileName;
+export type AgentEditorSection = "avatar" | "access" | "team" | AgentFileName;
 
 type AgentEditorModalProps = {
   open: boolean;
@@ -68,6 +70,12 @@ const editorSections: Array<{
     label: "Access",
     hint: "Manager dashboard login token.",
     icon: KeyRound,
+  },
+  {
+    id: "team",
+    label: "Team",
+    hint: "Sub-agents and recent sessions for this manager profile.",
+    icon: UsersRound,
   },
   {
     id: "SOUL.md",
@@ -246,6 +254,8 @@ export const AgentEditorModal = ({
                 onCancel={onClose}
                 onSave={(profile) => onAvatarSave(agent.agentId, profile)}
               />
+            ) : activeSection === "team" ? (
+              <AgentTeamSection agentId={agent.agentId} />
             ) : activeSection === "access" ? (
               <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-6">
                 <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4">

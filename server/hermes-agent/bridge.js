@@ -172,6 +172,25 @@ const toDisplayName = (name) =>
   name ? name.charAt(0).toUpperCase() + name.slice(1) : "";
 
 /**
+ * Restrict the fleet roster to a viewer's scope: the CEO ("all") sees
+ * everything; a scoped manager sees the default (CEO/operator) profile plus
+ * every profile named in their scope. Compare case-insensitively because
+ * profile ids come from disk directory names while user scopes are authored
+ * by hand.
+ */
+const filterRosterForViewerScope = (roster, scope) => {
+  if (!scope || scope === "all") return roster;
+  const scopeList = String(scope)
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+  if (scopeList.length === 0) return roster.filter((agent) => agent.isDefault);
+  return roster.filter(
+    (agent) => agent.isDefault || scopeList.includes(String(agent.id).toLowerCase()),
+  );
+};
+
+/**
  * Turn hermes-agent's profile list into Hermes3D agents.
  *
  * A profile is the backend's unit of identity — its own model, skills, memory
@@ -224,6 +243,9 @@ function createHermesAgentUpstream(options) {
     url,
     token,
     handshakeTimeoutMs,
+    // "all" = CEO/master; comma-separated profile names = scoped manager;
+    // "none" = unauthorized (defensive — the gate usually blocks earlier).
+    viewerScope = "all",
     log = () => {},
     logError = () => {},
   } = options || {};
@@ -613,7 +635,8 @@ function createHermesAgentUpstream(options) {
     await loadAgentRoster();
     // Only worth subscribing once the roster exists to map turns onto.
     startOfficeSpeech();
-    const agents = agentRoster.map((a) => ({
+    const scopedRoster = filterRosterForViewerScope(agentRoster, viewerScope);
+    const agents = scopedRoster.map((a) => ({
       agentId: a.id,
       name: a.name,
       isDefault: a.id === defaultAgentId,
@@ -674,13 +697,15 @@ function createHermesAgentUpstream(options) {
         return resOk(id, {
           defaultId: defaultAgentId,
           mainKey: MAIN_KEY,
-          agents: agentRoster.map(({ id: agentId, name, workspace, identity, role }) => ({
-            id: agentId,
-            name,
-            workspace,
-            identity,
-            role,
-          })),
+          agents: filterRosterForViewerScope(agentRoster, viewerScope).map(
+            ({ id: agentId, name, workspace, identity, role }) => ({
+              id: agentId,
+              name,
+              workspace,
+              identity,
+              role,
+            }),
+          ),
         });
 
       case "agents.delete": {
