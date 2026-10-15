@@ -264,14 +264,24 @@ export default function InsightsPage() {
                     <h2 className="font-medium">Live activity · {selectedProfile.name}</h2>
                     <span
                       className={`rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] uppercase tracking-wide ${
-                        activityStatus === "live"
+                        activityStatus === "live" && activity.length > 0
                           ? "bg-[oklch(0.62_0.17_145)] text-white"
                           : "bg-[var(--muted)] text-[var(--muted-foreground)]"
                       }`}
                     >
-                      {activityStatus}
+                      {activityStatus === "live"
+                        ? activity.length > 0
+                          ? "live"
+                          : "listening"
+                        : activityStatus}
                     </span>
                   </div>
+                  {activity.length > 0 ? (
+                    <p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+                      event terakhir: {new Date(activity[activity.length - 1].at).toLocaleTimeString()} ·{" "}
+                      {Math.max(1, Math.round((Date.now() - activity[activity.length - 1].at) / 1000))}s lalu
+                    </p>
+                  ) : null}
                   {activity.length === 0 ? (
                     <p className="mt-3 text-xs text-[var(--muted-foreground)]">
                       {activityStatus === "live"

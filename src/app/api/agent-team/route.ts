@@ -1,56 +1,27 @@
 import { NextResponse } from "next/server";
-import { NodeGatewayClient } from "@/lib/gateway/nodeGatewayClient";
+import { WebSocket } from "ws";
 import { loadStudioSettings } from "@/lib/studio/settings-store";
 
 export const runtime = "nodejs";
 
-type HermesRestSessionsResponse = {
-  sessions?: Array<{
-    id?: string;
-    display_name?: string | null;
-    profile?: string;
-    started_at?: number | null;
-    ended_at?: number | null;
-    message_count?: number;
-    source?: string | null;
-  }>;
+const asTrimmedString = (value: unknown) =>
+  typeof value === "string" ? value.trim() : "";
+
+type SpawnTreeNode = {
+  id?: string;
+  label?: string;
+  session_id?: string;
+  parent?: string;
 };
 
-type AgentTeamSession = {
-  id: string;
-  display_name: string;
-  started_at: number | null;
-  ended_at: number | null;
-  message_count: number | null;
-  source: string | null;
-  profile: string;
-};
+type SpawnTreeResponse = { nodes?: SpawnTreeNode[] } | null;
 
-type AgentTeamSubagent = {
+export type AgentTeamSubagent = {
   id: string;
   label: string;
   session_id: string | null;
-  parent: string;
+  parent: string | null;
 };
-
-type AgentTeamResponse = {
-  agentId: string;
-  profilesCount: number;
-  sessions: AgentTeamSession[];
-  subagents: AgentTeamSubagent[];
-};
-
-type SpawnTreeResponse = {
-  nodes?: Array<{
-    id?: string;
-    label?: string;
-    session_id?: string | null;
-    parent?: string | null;
-  }>;
-};
-
-const asTrimmedString = (value: unknown) =>
-  typeof value === "string" ? value.trim() : "";
 
 const restBaseUrlFromGatewayUrl = (gatewayUrl: string) => {
   if (gatewayUrl.startsWith("http://") || gatewayUrl.startsWith("https://")) return gatewayUrl;
@@ -68,43 +39,71 @@ const fetchWithTimeout = async (url: string, headers: HeadersInit, timeoutMs: nu
 };
 
 /**
- * Sub-agent/team panel data for one profile. Spawn tree (sub-agent
- * hierarchy) is a hermes RPC the bridge does not forward, so it's attempted
- * through the gateway and degrades gracefully when unsupported; the rest is
- * plain hermes REST (same Bearer token the Studio server already holds).
+ * hermes v0.19 exposes the sub-agent tree (spawn_tree.list) only as a JSON-RPC
+ * method on its WebSocket gateway — no REST fallback. Speak the JSON-RPC
+ * framing directly on /api/ws.
  */
-const loadSubagentsViaGateway = async (params: {
-  gatewayUrl: string;
+const loadSubagentsViaJsonRpc = async (params: {
+  restBase: string;
   token: string;
   agentId: string;
 }): Promise<AgentTeamSubagent[]> => {
-  const gatewayClient = new NodeGatewayClient();
-  try {
-    await gatewayClient.connect({ gatewayUrl: params.gatewayUrl, token: params.token });
-    const tree = (await gatewayClient.request("spawn_tree.list", {
-      cross_session: true,
-    })) as SpawnTreeResponse | null;
-    const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
-    return nodes
-      .map((node) => ({
-        id: asTrimmedString(node.id),
-        label:
-          asTrimmedString(node.label) ||
-          asTrimmedString(node.id) ||
-          "(unnamed sub-agent)",
-        session_id: asTrimmedString(node.session_id) || null,
-        parent: asTrimmedString(node.parent) || params.agentId,
-      }))
-      .filter((node) => node.id.length > 0 && node.parent === params.agentId);
-  } catch (error) {
-    console.info("[agent-team] spawn_tree RPC unavailable; skipping sub-agents.", {
-      error: error instanceof Error ? error.message : String(error),
-      agentId: params.agentId,
+  const parsed = new URL(params.restBase.replace(/\/+$/, ""));
+  parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+  parsed.pathname = "/api/ws";
+  const wsUrl = `${parsed.toString()}?token=${encodeURIComponent(params.token)}`;
+
+  const tree = await new Promise<SpawnTreeResponse>((resolve, reject) => {
+    const ws = new WebSocket(wsUrl, { headers: { Host: "localhost" } });
+    const timer = setTimeout(() => {
+      try { ws.close(); } catch { /* not open */ }
+      reject(new Error("spawn_tree.list timed out (12s)"));
+    }, 12_000);
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "spawn_tree.list", params: { cross_session: true, limit: 50 } }));
     });
-    return [];
-  } finally {
-    gatewayClient.close();
-  }
+    ws.on("message", (raw) => {
+      const frame = JSON.parse(raw.toString()) as {
+        id?: number; result?: unknown; error?: unknown;
+        method?: string; params?: { type?: string };
+      };
+      // gateway.ready event arrives before any response.
+      if (!frame.id) return;
+      clearTimeout(timer);
+      try { ws.close(); } catch { /* not open */ }
+      if (frame.error) {
+        reject(new Error(JSON.stringify(frame.error).slice(0, 160)));
+        return;
+      }
+      resolve((frame.result ?? null) as SpawnTreeResponse);
+    });
+    ws.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
+    ws.on("close", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`gateway closed (${code})`));
+    });
+  });
+
+  const nodes = Array.isArray(tree?.nodes) ? tree.nodes : [];
+  return nodes
+    .map((node) => ({
+      id: asTrimmedString(node.id),
+      label:
+        asTrimmedString(node.label) ||
+        asTrimmedString(node.id) ||
+        "(unnamed sub-agent)",
+      session_id: asTrimmedString(node.session_id) || null,
+      parent: asTrimmedString(node.parent) || params.agentId,
+    }))
+    .filter(
+      (node) =>
+        node.id.length > 0 &&
+        (node.parent.toLowerCase() === params.agentId.toLowerCase() ||
+          params.agentId.toLowerCase() === "default"),
+    );
 };
 
 export async function GET(request: Request) {
@@ -135,51 +134,58 @@ export async function GET(request: Request) {
   const headers = { Authorization: `Bearer ${token}` };
 
   try {
-    const profilesResponse = await fetchWithTimeout(`${base}/api/profiles`, headers, 12_000);
-    if (!profilesResponse.ok) throw new Error(`profiles endpoint HTTP ${profilesResponse.status}`);
-    const profilesData = (await profilesResponse.json()) as {
+    const [profilesResponse, sessionsResponse] = await Promise.all([
+      fetchWithTimeout(`${base}/api/profiles`, headers, 12_000),
+      fetchWithTimeout(
+        `${base}/api/profiles/sessions?profile=${encodeURIComponent(agentId)}&limit=50&order=recent`,
+        headers,
+        15_000,
+      ),
+    ]);
+    if (!profilesResponse.ok) {
+      return NextResponse.json(
+        { error: `agent-team.profiles_http_${profilesResponse.status}` },
+        { status: 502 },
+      );
+    }
+    const profilesPayload = (await profilesResponse.json()) as {
       profiles?: Array<{ name?: string }>;
     };
-    const profileNames = (profilesData.profiles ?? [])
-      .map((profile) => asTrimmedString(profile.name))
-      .filter(Boolean);
+    const profilesCount = (profilesPayload.profiles ?? []).length;
 
-    const sessionsResponse = await fetchWithTimeout(
-      `${base}/api/profiles/sessions?profile=${encodeURIComponent(agentId)}&limit=50&order=recent`,
-      headers,
-      15_000,
+    let sessions: Array<Record<string, unknown>> = [];
+    if (sessionsResponse.ok) {
+      const payload = (await sessionsResponse.json()) as {
+        sessions?: Array<Record<string, unknown>>;
+      };
+      sessions = (payload.sessions ?? []).slice(0, 10);
+    }
+
+    let subagents: AgentTeamSubagent[] = [];
+    let subagentsNote: string | null = null;
+    if (sessionsResponse.ok) {
+      try {
+        subagents = await loadSubagentsViaJsonRpc({ restBase: base, token, agentId });
+      } catch (error) {
+        subagents = [];
+        subagentsNote =
+          error instanceof Error ? error.message.slice(0, 120) : "spawn_tree unavailable";
+      }
+    }
+
+    return NextResponse.json(
+      {
+        agentId,
+        profilesCount,
+        sessions,
+        subagents,
+        ...(subagentsNote ? { subagentsNote } : {}),
+      },
+      { headers: { "Cache-Control": "no-store" } },
     );
-    const sessionsRaw: HermesRestSessionsResponse["sessions"] = sessionsResponse.ok
-      ? ((await sessionsResponse.json()) as HermesRestSessionsResponse).sessions ?? []
-      : [];
-
-    const sessions: AgentTeamSession[] = sessionsRaw
-      .map((session) => ({
-        id: asTrimmedString(session.id),
-        display_name: asTrimmedString(session.display_name) || asTrimmedString(session.id),
-        // hermes REST reports seconds since the epoch; the UI wants ms.
-        started_at:
-          typeof session.started_at === "number" ? Math.round(session.started_at * 1000) : null,
-        ended_at:
-          typeof session.ended_at === "number" ? Math.round(session.ended_at * 1000) : null,
-        message_count: typeof session.message_count === "number" ? session.message_count : null,
-        source: asTrimmedString(session.source) || null,
-        profile: asTrimmedString(session.profile) || "default",
-      }))
-      .slice(0, 10);
-
-    const subagents = await loadSubagentsViaGateway({ gatewayUrl, token, agentId });
-
-    const payload: AgentTeamResponse = {
-      agentId,
-      profilesCount: profileNames.length || 1,
-      sessions,
-      subagents,
-    };
-    return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load agent team.";
-    console.warn("[agent-team] Failed to load agent team.", { error: message, agentId });
+    const message = error instanceof Error ? error.message : "agent-team request failed";
+    console.error("[agent-team] request failed.", { error: message, agentId });
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }
