@@ -34,11 +34,18 @@ const resolveViewerScope = (request: Request) => {
   return header.split(",").map((entry) => entry.trim()).filter(Boolean);
 };
 
-/** CEO-only: read the manager token (if any) for one agent. */
+/**
+ * Access token visibility rules:
+ * - viewer scope "all" (CEO/master): melihat token semua agent.
+ * - scoped manager: hanya token milik dirinya (profil dalam scope-nya) atau
+ *   sub-agent di bawah profil-nya (entry user yang scope-nya memuat profil
+ *   viewer).
+ */
 export async function GET(request: Request) {
-  if (resolveViewerScope(request) !== "all") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
+  const scope = resolveViewerScope(request);
+  const isAll = scope === "all";
+  const scopeList = isAll ? [] : (Array.isArray(scope) ? scope : []);
+
   let data: UsersFile = { users: [] };
   try {
     data = JSON.parse(await readFile(registryPath(), "utf8")) as UsersFile;
@@ -49,14 +56,52 @@ export async function GET(request: Request) {
   if (!agentId) {
     return NextResponse.json({ error: "invalid_agent_id" }, { status: 400 });
   }
+  const lowerAgentId = agentId.toLowerCase();
+  const lowerScope = scopeList.map((name) => name.toLowerCase());
+
   const user = (data.users ?? []).find(
     (entry) =>
       Array.isArray(entry.scope) &&
       entry.scope.some((name) => String(name).toLowerCase() === agentId.toLowerCase()),
   );
+
+  if (!isAll) {
+    // Viewer harus menyebut profil miliknya atau sub-agent di bawah profilnya.
+    // Entry user lain yang scope-nya memuat salah satu profil viewer = sub-agent tim viewer.
+    const subProfileIds: string[] = [];
+    for (const entry of data.users ?? []) {
+      const entryLower = ((entry.scope as string[] | undefined) ?? []).map((n) =>
+        String(n).toLowerCase(),
+      );
+      const isSubOfViewer =
+        entryLower.some((name) => lowerScope.includes(name)) &&
+        !entryLower.every((name) => lowerScope.includes(name));
+      if (isSubOfViewer) {
+        for (const name of entryLower) subProfileIds.push(name);
+      }
+    }
+    // Profil yang dilarang: mana pun di luar (scope viewer ∪ sub-agent tim viewer).
+    const allowedIds = new Set([...lowerScope, ...subProfileIds]);
+    if (!allowedIds.has(lowerAgentId)) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+  }
+
   if (!user) {
     return NextResponse.json({ exists: false, agentId });
   }
+
+  if (!isAll) {
+    const entryScope = ((user.scope as string[] | undefined) ?? []).map((name) =>
+      String(name).toLowerCase(),
+    );
+    const isSelf = entryLowerSameSet(lowerScope, entryScope);
+    const isBelowViewer = entryScope.some((name) => lowerScope.includes(name)) && !lowerScope.every((name) => entryScope.includes(name));
+    if (!isSelf && !isBelowViewer) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+  }
+
   return NextResponse.json({
     exists: true,
     agentId,
@@ -66,7 +111,16 @@ export async function GET(request: Request) {
   });
 }
 
+const entryLowerSameSet = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((name) => b.includes(name));
+
 export async function POST(request: Request) {
+  // Mint token = CEO-only. Manager tidak boleh membuat/mengubah token sendiri
+  // (kalau kehilangan token, CEO yang mint ulang).
+  const scope = resolveViewerScope(request);
+  if (scope !== "all") {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const settings = loadStudioSettings();
   const gatewayToken = asTrimmedString(settings.gateway?.token);
   const gatewayUrl = asTrimmedString(settings.gateway?.url);

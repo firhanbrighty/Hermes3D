@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useViewerIsOwner } from "@/features/agents/components/inspect/useViewerIsOwner";
 
 type InviteResponse = {
   exists?: boolean;
@@ -12,11 +13,12 @@ type InviteResponse = {
 };
 
 /**
- * CEO-only inspect section: read the manager's dashboard access token for
- * this agent, mint it when missing. The token lives in the server-side user
- * registry (users.json) — the section only renders for scope "all" viewers.
+ * Access section in the agent editor:
+ * - viewer scope "all" (CEO): full access — show/copy/mint untuk semua agent.
+ * - scoped manager: token profilnya sendiri only, read-only reveal (tanpa mint).
  */
 export const AgentAccessTokenSection = ({ agentId }: { agentId: string }) => {
+  const isOwner = useViewerIsOwner();
   const [state, setState] = useState<{
     loading: boolean;
     userId: string | null;
@@ -72,6 +74,7 @@ export const AgentAccessTokenSection = ({ agentId }: { agentId: string }) => {
   }, [load]);
 
   const mint = useCallback(async () => {
+    if (!isOwner) return; // mint = CEO only
     setState((current) => ({ ...current, mintBusy: true, error: null }));
     try {
       const response = await fetch("/api/gateway/agent-create-invite", {
@@ -104,7 +107,7 @@ export const AgentAccessTokenSection = ({ agentId }: { agentId: string }) => {
         error: error instanceof Error ? error.message : "Failed to mint token",
       }));
     }
-  }, [agentId]);
+  }, [agentId, isOwner]);
 
   const tokenLabel = state.revealed ? state.token : "•".repeat(32);
 
@@ -112,10 +115,17 @@ export const AgentAccessTokenSection = ({ agentId }: { agentId: string }) => {
     <section className="sidebar-section" data-testid="agent-access-token">
       <div className="px-1 py-1">
         <span className="font-medium text-foreground/88 text-[12px]">Manager access</span>
-        <div className="sidebar-copy mt-1 text-[11px] text-muted-foreground">
-          Token yang dipakai manager profil ini untuk login dashboard
-          (hermes.groovingspaces.com). Hanya tampil untuk akses CEO.
-        </div>
+        {isOwner ? null : (
+          <div className="sidebar-copy mt-1 text-[11px] text-muted-foreground">
+            Token login dashboard untuk profil ini (terlihat karena profil ini milikmu).
+          </div>
+        )}
+        {!isOwner ? null : (
+          <div className="sidebar-copy mt-1 text-[11px] text-muted-foreground">
+            Token yang dipakai manager profil ini untuk login dashboard
+            (hermes.groovingspaces.com). Hanya tampil untuk akses CEO.
+          </div>
+        )}
 
         {state.loading ? (
           <div className="mt-2 text-[11px] text-muted-foreground">Loading…</div>
@@ -154,17 +164,21 @@ export const AgentAccessTokenSection = ({ agentId }: { agentId: string }) => {
         ) : (
           <div className="mt-2">
             <div className="text-[11px] text-muted-foreground">
-              Belum ada token untuk profil ini.
+              {isOwner
+                ? "Belum ada token untuk profil ini."
+                : "Token belum dibuat oleh CEO untuk profil ini."}
             </div>
-            <button
-              type="button"
-              data-testid="agent-token-mint"
-              onClick={() => void mint()}
-              disabled={state.mintBusy}
-              className="mt-2 rounded-md border border-border px-2.5 py-1.5 text-[11px] font-medium hover:bg-accent disabled:opacity-40"
-            >
-              {state.mintBusy ? "Minting…" : "Buat access token"}
-            </button>
+            {isOwner ? (
+              <button
+                type="button"
+                data-testid="agent-token-mint"
+                onClick={() => void mint()}
+                disabled={state.mintBusy}
+                className="mt-2 rounded-md border border-border px-2.5 py-1.5 text-[11px] font-medium hover:bg-accent disabled:opacity-40"
+              >
+                {state.mintBusy ? "Minting…" : "Buat access token"}
+              </button>
+            ) : null}
           </div>
         )}
       </div>
