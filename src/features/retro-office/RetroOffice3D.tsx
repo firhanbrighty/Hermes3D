@@ -5780,7 +5780,7 @@ export function RetroOffice3D({
           <SceneErrorBoundary>
           <Canvas
             key={canvasResetKey}
-            dpr={[0.85, graphicsQualityConfig.maxDpr]}
+            dpr={[1, graphicsQualityConfig.maxDpr]}
             camera={{
               position: CAM_POS,
               fov: SCENE_CAMERA_FOV,
@@ -5789,6 +5789,7 @@ export function RetroOffice3D({
             }}
             shadows={{ type: THREE.PCFShadowMap }}
             gl={{
+              logarithmicDepthBuffer: true,
               antialias: true,
               powerPreference: "high-performance",
               toneMapping: THREE.ACESFilmicToneMapping,

@@ -281,7 +281,7 @@ export function SceneAtmosphere({
         castShadow
         shadow-mapSize={[config.shadowMapSize, config.shadowMapSize]}
         shadow-bias={-0.00015}
-        shadow-normalBias={0.025}
+        shadow-normalBias={0.045}
         shadow-radius={4}
         shadow-camera-left={-SHADOW_EXTENT}
         shadow-camera-right={SHADOW_EXTENT}
