@@ -734,42 +734,42 @@ export const FloorAndWalls = memo(function FloorAndWalls({
         />
       ) : null}
 
-      <mesh position={[localOfficeCenterX, 0.03, localNorthWallZ + 0.04]}>
+      <mesh position={[localOfficeCenterX, 0.031, localNorthWallZ + 0.062]}>
         <boxGeometry args={[localOfficeWidth, 0.06, 0.04]} />
         <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
       </mesh>
       {showRemoteOffice ? (
-        <mesh position={[localOfficeCenterX, 0.03, localNorthWallZ + 0.04 + remoteOfficeOffsetZ]}>
+        <mesh position={[localOfficeCenterX, 0.031, localNorthWallZ + 0.062 + remoteOfficeOffsetZ]}>
           <boxGeometry args={[localOfficeWidth, 0.06, 0.04]} />
           <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
         </mesh>
       ) : null}
-      <mesh position={[localOfficeCenterX, 0.03, localSouthWallZ - 0.04]}>
+      <mesh position={[localOfficeCenterX, 0.031, localSouthWallZ - 0.062]}>
         <boxGeometry args={[localOfficeWidth, 0.06, 0.04]} />
         <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
       </mesh>
       {showRemoteOffice ? (
-        <mesh position={[localOfficeCenterX, 0.03, localSouthWallZ - 0.04 + remoteOfficeOffsetZ]}>
+        <mesh position={[localOfficeCenterX, 0.031, localSouthWallZ - 0.062 + remoteOfficeOffsetZ]}>
           <boxGeometry args={[localOfficeWidth, 0.06, 0.04]} />
           <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
         </mesh>
       ) : null}
-      <mesh position={[localWestWallX + 0.04, 0.03, localOfficeCenterZ]}>
+      <mesh position={[localWestWallX + 0.062, 0.031, localOfficeCenterZ]}>
         <boxGeometry args={[0.04, 0.06, localOfficeHeight]} />
         <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
       </mesh>
       {showRemoteOffice ? (
-        <mesh position={[localWestWallX + 0.04, 0.03, localOfficeCenterZ + remoteOfficeOffsetZ]}>
+        <mesh position={[localWestWallX + 0.062, 0.031, localOfficeCenterZ + remoteOfficeOffsetZ]}>
           <boxGeometry args={[0.04, 0.06, localOfficeHeight]} />
           <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
         </mesh>
       ) : null}
-      <mesh position={[localEastWallX - 0.04, 0.03, localOfficeCenterZ]}>
+      <mesh position={[localEastWallX - 0.062, 0.031, localOfficeCenterZ]}>
         <boxGeometry args={[0.04, 0.06, localOfficeHeight]} />
         <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
       </mesh>
       {showRemoteOffice ? (
-        <mesh position={[localEastWallX - 0.04, 0.03, localOfficeCenterZ + remoteOfficeOffsetZ]}>
+        <mesh position={[localEastWallX - 0.062, 0.031, localOfficeCenterZ + remoteOfficeOffsetZ]}>
           <boxGeometry args={[0.04, 0.06, localOfficeHeight]} />
           <meshStandardMaterial color="#14151a" roughness={0.85} metalness={0.1} />
         </mesh>
