@@ -64,8 +64,10 @@ export const createEmptyPersonalityDraft = (): PersonalityBuilderDraft => ({
 const cleanLabel = (value: string) => value.replace(/[*_]/g, "").trim().toLowerCase();
 
 const cleanValue = (value: string) => {
-  let next = value.trim();
-  next = next.replace(/^[*_]+|[*_]+$/g, "").trim();
+  // Roundtrip per-keystroke: simpan trailing whitespace supaya mengetik spasi
+  // ("Firhan IT") tidak dimangkasi parser. Markdown artifacts di-strip.
+  let next = value.replace(/^\s+/, "").replace(/\r/g, "");
+  next = next.replace(/^[*_]+/g, "").replace(/[*_]+$/g, "");
   return next;
 };
 
@@ -108,7 +110,10 @@ const parseLabelMap = (content: string): Map<string, string> => {
   const map = new Map<string, string>();
   const lines = content.split(/\r?\n/);
   for (const line of lines) {
-    const trimmed = line.trim();
+    // Line start only — trailing spasi adalah bagian dari nilai yang sedang
+    // diketik; trimEnd di sini memangkasnya dan menyebabkan spasi hilang di
+    // input terkontrol.
+    const trimmed = line.replace(/^\s+/, "");
     if (/^##\s+/.test(trimmed)) {
       break;
     }
@@ -182,7 +187,9 @@ const parseSection = (content: string, sectionTitle: string): string => {
 
 const normalizeText = (value: string) => value.replace(/\r\n/g, "\n").trim();
 
-const normalizeListField = (value: string) => value.replace(/\r\n/g, "\n").trim();
+// Tanpa trim: field ini roundtrip per keystroke; menyimpan trailing space di
+// baris markdown tidak berbahaya dan menjaga typed space tidak hilang.
+const normalizeListField = (value: string) => value.replace(/\r\n?/g, "\n");
 
 const serializeIdentityMarkdown = (draft: PersonalityBuilderDraft["identity"]) => {
   const name = normalizeListField(draft.name);
